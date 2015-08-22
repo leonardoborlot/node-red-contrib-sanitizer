@@ -1,98 +1,191 @@
-module.exports = function(RED) {
+module.exports = function(RED) 
+{
     "use strict";
-    var util = require("util");
 
+    //Below Operators are not required since only Sanitization needs to be done but are kept just for testing purpose.
+    var operators = {
+        'eq': function(a, b) { return a == b; },
+        'neq': function(a, b) { return a != b; },
+        'lt': function(a, b) { return a < b; },
+        'lte': function(a, b) { return a <= b; },
+        'gt': function(a, b) { return a > b; },
+        'gte': function(a, b) { return a >= b; },
+        'btwn': function(a, b, c) { return a >= b && a <= c; },
+        'cont': function(a, b) { return (a + "").indexOf(b) != -1; },
+        'regex': function(a, b) { return (a + "").match(new RegExp(b)); },
+        'true': function(a) { return a === true; },
+        'false': function(a) { return a === false; },
+        'null': function(a) { return (typeof a == "undefined" || a === null); },
+        'nnull': function(a) { return (typeof a != "undefined" && a !== null); },
+    };
 
-
-    // The main node definition - most things happen in here
-    function SanitizerNode(n) {
-        // Create a RED node
-        RED.nodes.createNode(this,n);
-
-        this.optionSelected = n.optionSelected
-
-        // Store local copies of the node configuration (as defined in the .html)
-        this.topic = n.topic;
-
-        // copy "this" object in case we need it in context of callbacks of other functions.
+    function SanitizerNode(n) 
+    {
+        RED.nodes.createNode(this, n);
+        this.rules = n.rules || [];
         var node = this;
 
-        var msg = {};
-        msg.topic = this.topic;
-        //msg.payload = "Hello world !";
+        this.on('input', function (msg) 
+        {
+            //Just in case the input never went through a JSON parser, Just adding the JSON parser code here
 
-        // send out the message to the rest of the workspace.
-        // ... this message will get sent at startup so you may not see it in a debug node.
-        //this.send(msg);
-
-        // respond to inputs....
-        this.on('input', function (msg) {
-            //node.warn("I saw a payload: "+msg.payload);
-            // in this example just send it straight on... should process it here really
-            try 
+            if (msg.hasOwnProperty("payload")) 
             {
-                
-                if (msg.hasOwnProperty("payload")) 
-                {
-                    if (typeof msg.payload === "string") {
-                        try {
-                            msg.payload = JSON.parse(msg.payload);
-                            //node.send(msg);
+                    
+                        if (typeof msg.payload === "string") {
+                            try {
+                                msg.payload = JSON.parse(msg.payload);
+                                //node.send(msg);
+                            }
+                            catch(e) 
+                            { 
+                                node.error("Exiting due to the following reason: ");
+                                throw "Error Code:1 -> JSON not in right format: " + e ;
+                            }
                         }
-                        catch(e) { node.error(e.message,msg); }
-                    }
-                    else if (typeof msg.payload === "object") {
-                        if ((!Buffer.isBuffer(msg.payload)) && (!util.isArray(msg.payload))) {
-                            msg.payload = JSON.stringify(msg.payload);
-                            //node.send(msg);
+                        else if (typeof msg.payload === "object") {
+                            if ((!Buffer.isBuffer(msg.payload)) && (!util.isArray(msg.payload))) {
+                                msg.payload = JSON.stringify(msg.payload);
+                                //node.send(msg);
+                            }
+                            else { node.warn(RED._("json.errors.dropped-object")); }
                         }
-                        else { node.warn(RED._("json.errors.dropped-object")); }
-                    }
-                    else { node.warn(RED._("json.errors.dropped")); }
-                }
-
-
-
-                
-                if ( this.optionSelected == "firstName" )
-                {
-                    node.send(msg.payload.firstName)
-                    //node.warn(msg.payload.firstName)
-                }
-                else if ( this.optionSelected == "middleName"  )
-                {
-                    node.send(msg.payload.middleName)
-                    //node.warn(msg.payload.middleName)
-                }
-                else if ( this.optionSelected == "lastName"  )
-                {
-                    node.send(msg.payload.lastName)
-                    //node.warn(msg.payload.lastName)
-                }
-                else if ( this.optionSelected == "fullName" )
-                {
-                    node.send( msg.payload.firstName + " " + msg.payload.middleName + " " + msg.payload.lastName )
-                    //node.warn( msg.payload.firstName + " " + msg.payload.middleName + " " + msg.payload.lastName )
-                }
-                //node.warn(this.optionSelected)
-                //node.send(msg);
-                
-            }
-            catch(err) {
-                node.warn(err);
+                        else { node.warn(RED._("json.errors.dropped")); }     
             }
 
-        });
+            // Collecting the name of the properties that were entered by the user over the Web Interface.
 
-        this.on("close", function() {
-            // Called when the node is shutdown - eg on redeploy.
-            // Allows ports to be closed, connections dropped etc.
-            // eg: node.client.disconnect();
+            var properties = [] ;
+            var operation = [] ;
+            var output = [] ;
+
+            for (var i=0; i<node.rules.length; i+=1) 
+            {
+                properties[i] = node.rules[i].property ;
+            }
+
+            // Function to check if all the properties entered by the user actually exists in the message that is being sent as input ( msg.payload )
+
+            function checkIfAsgPropExists( element , index , array )
+            {
+                if ( Object.keys(msg.payload).indexOf(element) == -1 )
+                {
+                    node.error("Exiting due to the following reason: ");
+                    throw "Error Code:2 -> The Property: " + element  + " does not exist in the msg.payload";
+                }
+            }
+
+            // Function to check if the value is a number
+
+            function checkIfNumber( elementToBeChecked )
+            {
+                try
+                {
+                    
+                    if (  typeof ( parseInt(elementToBeChecked) ) === "number" &&  ! isNaN( parseInt(elementToBeChecked) )  ) 
+                    { 
+                        return ( typeof ( parseInt(elementToBeChecked) ) )
+                    }
+                    else
+                    {
+                        return "notNumber"
+                    } 
+                    //node.warn("test:" + parseInt(elementToBeChecked))
+                }
+                catch ( parseError )
+                {
+                    //node.error("Exiting due to the following reason: ");
+                    throw "Error Code:5 -> Failed to parse : " + typeof( elementToBeChecked ) + " to number" ; 
+                    return "notNumber"
+                }
+            }
+
+            //Invoking the checkIfAsgPropExists function for each element in the array of properties collected over the Web Interface from the User.
+            properties.forEach( checkIfAsgPropExists )
+
+            // Checking the rules and validating the input entered by the user as well the input from the message 
+
+            for (var i=0; i<node.rules.length; i+=1) 
+            {
+                properties[i] = node.rules[i].property ;
+                operation[i] = node.rules[i].t;
+                if (!(operation[i] === "true" || operation[i] === "false" || operation[i] === "null" || operation[i] === "nnull" ))
+                {
+                    if ( operation[i] == "btwn" )
+                    {
+
+                        if (  checkIfNumber( msg.payload[ properties[i]] ) === "number" && checkIfNumber(node.rules[i].v)  === "number" && checkIfNumber(node.rules[i].v2) === "number" )
+                        {
+                            output[i] =  operators[ operation[i] ] ( msg.payload[ properties[i] ] , node.rules[i].v  , node.rules[i].v2 )
+                        }
+                        else
+                        {
+                            node.error("Exiting due to the following reason: ");
+                            throw "Error Code:3 -> Expected Number, got a different type of content other than number\n" + " Operation: " + operation[i]  + "Message : " + typeof(msg.payload[ properties[i] ] ) + "\nValue 1: " + typeof(node.rules[i].v) + "\nValue 2: "  + typeof(node.rules[i].v2) ;
+                        }
+                        
+                    }
+                    else if ( operation[i] == "lt" || operation[i] == "lte" || operation[i] == "gt" || operation[i] == "gte" )
+                    {
+                        if ( checkIfNumber(msg.payload[ properties[i] ])  === "number" && checkIfNumber(node.rules[i].v)  === "number"  )
+                        {
+                            output[i] =  operators[ operation[i] ] (   msg.payload[ properties[i] ] , node.rules[i].v  )
+                        }
+                        else
+                        {
+                            node.error("Exiting due to the following reason: ");
+                            throw "Error Code:3 -> Expected Number, got a different type of content other than number\n" + " Operation: " + operation[i] + " Message : " + typeof(msg.payload[ properties[i] ] ) + "\nValue : " + typeof(node.rules[i].v)  ;
+                        }
+
+                    }
+                    else 
+                    {
+                        output[i] =  operators[ operation[i] ] ( node.rules[i].v  , msg.payload[ properties[i] ] )
+                    }       
+                }
+                else
+                {
+                    if ( operation[i] === "true" || operation[i] === "false"  )
+                    {
+                        if ( typeof(msg.payload[ properties[i] ]) === "boolean" )
+                        {
+                            output[i] =  operators[ operation[i] ] ( msg.payload[ properties[i] ] )
+                        }
+                        else
+                        {
+                            node.error("Exiting due to the following reason: ");
+                            throw "Error Code:4-> Expected Boolean, got a different type of content other than boolean: " + " Operation: " + operation[i] + typeof(msg.payload[ properties[i] ]) ;
+                        }
+                    }
+                    else
+                    {
+                        output[i] =  operators[ operation[i] ] ( msg.payload[ properties[i] ] )
+                    }
+                    
+                }
+
+            }
+
+            //Actual output of the various operations in the same order they are entered. 
+            //Below code is used just for testing. It can be ignored when only sanitization is required.
+            for (var i=0; i<node.rules.length; i+=1) 
+            {
+                if ( operation[i] == "btwn" )
+                {
+                    node.send( "Operation: " + operation[i] + " Message value: " + msg.payload[ properties[i] ] + " User selected value1: " + node.rules[i].v + " User selected value1: " + node.rules[i].v2 + " Output: " + output[i] )
+                }
+                else if (!(operation[i] === "true" || operation[i] === "false" || operation[i] === "null" || operation[i] === "nnull" ))
+                {
+                    node.send( "Operation: " + operation[i] + " Message value: " + msg.payload[ properties[i] ] + " User selected value: " + node.rules[i].v + " Output: " + output[i] )
+                }
+                else
+                {
+                    node.send( "Operation: " + operation[i] + " Message value: " + msg.payload[ properties[i] ] + " Output: " + output[i] );
+                }
+                
+            }
+
         });
     }
-
-    // Register the node by name. This must be called before overriding any of the
-    // Node functions.
-    RED.nodes.registerType("sanitizer",SanitizerNode);
-
+    RED.nodes.registerType("sanitizer", SanitizerNode);
 }
